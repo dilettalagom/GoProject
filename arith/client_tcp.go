@@ -16,20 +16,18 @@ func main() {
 		log.Fatal("Error in dialing: ", err)
 	}
 	defer client.Close()
-	
 
-	// Synchronous call
-	//args := &rpcexample.Args{0, 0}
+	/*TODO: prova RPC con somma di un array*/
+	array := rpcexample.Args{make([]int, 5)}
 
-	array := rpcexample.Args{make ([] int, 5)}
-
+	fmt.Printf("Inserire 5 valori\n")
 	x := 0
-	for i:=0; i < 5; i++ {
+	for i := 0; i < 5; i++ {
 		fmt.Scanf("%d", &x)
 		array.Vect[i] = x
 	}
 
-	for i:=0; i < 5; i++ {
+	for i := 0; i < 5; i++ {
 		fmt.Printf("Elementi: %d\n", array.Vect[i])
 	}
 
@@ -37,24 +35,33 @@ func main() {
 	fmt.Printf("array: %d\n", array.Vect)
 
 	// reply will store the RPC result
-	//var mulReply rpcexample.Result
 	var sum rpcexample.Sum
 	// Call remote procedure
-	err = client.Call("Arithmetic.Sum", array, &sum)
+	err = client.Call("arithmetic.Somma", array, &sum)
 	if err != nil {
-		log.Fatal("Error in Arithmetic.Sum: ", err)
+		log.Fatal("Error in arithmetic.Somma: ", err)
 	}
-	fmt.Printf("Arithmetic.Sum: %d\n", sum)
+	fmt.Printf("arithmetic.Somma: %d\n", sum)
 
-}
+	/* TODO:Synchronous call*/
+	args := &rpcexample.Fattori{5, 6}
+	// reply will store the RPC result
+	var mulReply rpcexample.Result
+	// Call remote procedure
+	err = client.Call("arithmetic.Multiply", args, &mulReply)
+	if err != nil {
+		log.Fatal("Error in arithmetic.Multiply: ", err)
+	}
+	fmt.Printf("arithmetic.Multiply: %d*%d=%d\n", args.A, args.B, mulReply) /**/
 
-	/* Asynchronous call
+	/* TODO:Asynchronous call
 	args = &rpcexample.Args{501, 100}
 	divReply := new(rpcexample.Quotient)
-	divCall := client.Go("Arithmetic.Divide", args, divReply, nil)
+	divCall := client.Go("arithmetic.Divide", args, divReply, nil)
 	divCall = <-divCall.Done
 	if divCall.Error != nil {
-		log.Fatal("Error in Arithmetic.Divide: ", divCall.Error.Error())
+		log.Fatal("Error in arithmetic.Divide: ", divCall.Error.Error())
 	}
-	fmt.Printf("Arithmetic.Divide: %d/%d=%d (rem=%d)\n", args.A, args.B, divReply.Quo, divReply.Rem)
-}*/
+	fmt.Printf("arithmetic.Divide: %d/%d=%d (rem=%d)\n", args.A, args.B, divReply.Quo, divReply.Rem)
+	}*/
+}

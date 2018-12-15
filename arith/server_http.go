@@ -18,7 +18,7 @@ func main() {
 	// Only structs which implement Arith interface
 	// are allowed to register themselves
 	server := rpc.NewServer()
-	err := server.RegisterName("Arithmetic", arith)
+	err := server.RegisterName("arithmetic", arith)
 	if err != nil {
 		log.Fatal("Format of service Arith is not correct: ", err)
 	}
