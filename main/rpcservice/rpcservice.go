@@ -2,9 +2,11 @@ package rpcservice
 
 import (
 	"fmt"
-	"io"
+	"io/ioutil"
+	"log"
 	"math"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -13,7 +15,6 @@ type Args struct {
 	N               int
 	M               int
 	Offset          int
-	Num_rows        int
 	Chan_to_reducer *chan map[string]int
 }
 
@@ -29,49 +30,41 @@ func check(err error) {
 }
 
 //goroutines
-func mapper(wg *sync.WaitGroup, file *os.File, offset int, block_size int, channel_reducer *chan map[string]int) {
+func wordcount(wg *sync.WaitGroup, offset int, block_size int, buf []string, channel_reducer *chan map[string]int) {
 
 	defer wg.Done()
 
-	//change seek
-	_, err := file.Seek(int64(offset), io.SeekStart)
-	check(err)
-
-	//fmt.Printf("seek %d\n", seek)
-	//creating word_map
 	var word_map = make(map[string]int)
 
-	//Split of file
-	/*scanner := bufio.NewScanner(file)
+	for i := 0; i < len(buf); i++ {
 
-	for scanner.Scan()  {
-		for i:=0; i < block_size; i++{
-			line := scanner.Text()
-			//fmt.Printf("riga %s\n", line)
-			parts := strings.Split(line, " ")
-			for _, newKey := range parts {
-				//creating word_map
-				_, ok := word_map[newKey]
-				if (!ok) {
-					word_map[newKey] = 1
-				}else{
-					word_map[newKey] += 1
-				}
-			}
+		fmt.Printf("Chiave: %s\n", buf[i])
+
+		key := buf[i]
+
+		_, ok := word_map[key]
+		if !ok {
+			word_map[key] = 1
+		} else {
+			word_map[key] += 1
 		}
-		break
-	}*/
+	}
 
-	//TODO: read byte per byte
-
-	//TEST
-	for key, value := range word_map {
+	/*for key, value := range word_map {
 		fmt.Println("Key:", key, "Value:", value)
 	}
-	fmt.Println("\n")
+	fmt.Println("\n")*/
 
-	//TODO:per ogni chiave trasforma in byte e fa hash
-	//invio sul canale indicizzato dall'hashing
+	//TODO: send to channel_reducer[j]
+	for key, _ := range word_map {
+		var sum uint8 = 0
+		for j := 0; j < len(key); j++ {
+			sum += byte(key[j])
+		}
+		if len(*channel_reducer) != 0 {
+			fmt.Printf("hashing %d\n", int(sum)%len(*channel_reducer))
+		}
+	}
 
 }
 
@@ -87,40 +80,54 @@ func (w *Wordcounter) Map(args Args, Result *Result) error {
 	args.Chan_to_reducer = &chan_tmp
 
 	//getFileSize
-	file_info, err := os.Stat(file_stream.Name())
+	file_info, err := os.Stat(args.File)
 	check(err)
 	size := file_info.Size()
 	if size == 0 {
 		os.Exit(1)
 	}
 
-	//TODO: goroutines REDUCER-> wait barrier +wg.add(M)
+	//buffer for file
+	buf := make([]byte, size)
 
-	//compute partitions
-	num_rows := int(math.Ceil(float64(int(size) / args.N)))
+	//read the entire file
+	buf, err = ioutil.ReadFile(args.File)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	for i := 0; i < num_rows; i += 1 {
+	//closing file --> only for stream, no need to close is though
 
-		size_tmp := int(math.Min(float64(num_rows), float64(int(size)-(i*num_rows)))) //amount to read
+	err = file_stream.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-		remainder := int(float64(int(size) - (i * num_rows)))
+	//TODO: create M thread and put them waiting on a barrier
 
-		args.Offset = i * num_rows
+	//get an array of words and compute the number of words for each thread
+	list_of_words := strings.Split(string(buf), " ")
+	//number_of_words := math.Ceil(float64(len(list_of_words))/float64(num_worker))
+	number_of_words := int(float64(len(list_of_words)) / float64(args.N))
 
-		if i == num_rows-1 {
-			args.Num_rows = remainder
-			//TODO: goroutines MAPPER
-			wg.Add(1)
-			fmt.Printf("ULTIMOOO offset - size %d\n", args.Offset, remainder)
-			go mapper(&wg, file_stream, args.Offset, remainder, args.Chan_to_reducer)
+	fmt.Printf("All words and number of words for each thread: %d - %d\n", len(list_of_words), number_of_words)
+
+	for i := 0; i < args.N; i += 1 {
+
+		wg.Add(1)
+
+		//compute the offset from which each thread starts and the number of words to count
+		args.Offset = i * int(number_of_words)
+		words_to_read := int(math.Min(float64(number_of_words), float64(int(len(list_of_words))-(i*int(number_of_words)))))
+
+		fmt.Printf("Quanto legge e da dove parte: %d --- %d\n", words_to_read, args.Offset)
+
+		if i == args.N-1 {
+			//last thread may read more than words_to_read words
+			go wordcount(&wg, args.Offset, words_to_read, list_of_words[args.Offset:], args.Chan_to_reducer)
 		} else {
-			args.Num_rows = size_tmp
-			//TODO: goroutines MAPPER
-			wg.Add(1)
-			fmt.Printf("offset - size %d\n", args.Offset, size_tmp)
-			go mapper(&wg, file_stream, args.Offset, size_tmp, args.Chan_to_reducer)
+			go wordcount(&wg, args.Offset, words_to_read, list_of_words[args.Offset:(i+1)*words_to_read], args.Chan_to_reducer)
 		}
-		//TODO: wait of REDUCERS
 
 		wg.Wait()
 

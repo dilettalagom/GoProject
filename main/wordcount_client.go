@@ -49,20 +49,26 @@ func main() {
 	files, err := ioutil.ReadDir(os.Args[3])
 	check(err)
 
-	//creating a worker for each file
+	//creating a worker for each file.txt
 	for _, f := range files {
 
 		name_file := DIR_PATH.Name() + "/" + f.Name()
-		/*file_stream, err := os.Open(name_file)
-		check(err)*/
+		file_stream, err := os.Open(name_file)
+		check(err)
 
+		file_stream = file_stream
 		//setup rpc arg
 		args_rpc := rpcservice.Args{}
-		args_rpc.File = name_file
+		args_rpc.File = name_file //perché prima metteva tutta la directory + file (file_stream.Name())
 		args_rpc.N = N
 		args_rpc.M = M
 
-		//rpc call -> file
+		/*err = file_stream.Close()
+		if err != nil {
+			log.Fatal(err)
+		}*/
+
+		//rpc call -> file.txt
 		// reply will store the RPC result
 		var wordcount rpcservice.Result
 
