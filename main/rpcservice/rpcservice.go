@@ -1,44 +1,37 @@
 package rpcservice
 
 import (
+	"./barrier"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"math"
-	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Args struct {
-	File            string
-	N               int
-	M               int
-	Offset          int
-	Chan_to_reducer *chan map[string]int
+	File   string
+	N      int
+	M      int
+	Offset int
 }
 
 type Result map[string]int
 
 type Wordcounter int
 
-//utils
-func check(err error) {
-	if err != nil {
-		panic(err)
-	}
-}
-
 //goroutines
-func wordcount(wg *sync.WaitGroup, offset int, block_size int, buf []string, channel_reducer *chan map[string]int) {
+func mapper(wg *sync.WaitGroup, br *barrier.Barrier, buf []string, channel_reducer *[]chan map[string]int) {
 
 	defer wg.Done()
 
-	var word_map = make(map[string]int)
+	fmt.Println(buf)
+
+	word_map := make(map[string]int)
 
 	for i := 0; i < len(buf); i++ {
-
-		fmt.Printf("Chiave: %s\n", buf[i])
 
 		key := buf[i]
 
@@ -50,21 +43,58 @@ func wordcount(wg *sync.WaitGroup, offset int, block_size int, buf []string, cha
 		}
 	}
 
-	/*for key, value := range word_map {
-		fmt.Println("Key:", key, "Value:", value)
-	}
-	fmt.Println("\n")*/
+	br.Wait_on_barrier()
 
-	//TODO: send to channel_reducer[j]
 	for key, _ := range word_map {
 		var sum uint8 = 0
 		for j := 0; j < len(key); j++ {
 			sum += byte(key[j])
 		}
+
 		if len(*channel_reducer) != 0 {
-			fmt.Printf("hashing %d\n", int(sum)%len(*channel_reducer))
+			c_index := int(sum) % len(*channel_reducer)
+			//fmt.Printf("hashing %d\n", c_index)
+			m := map[string]int{key: word_map[key]}
+			(*channel_reducer)[c_index] <- m
 		}
 	}
+
+}
+
+func reducer(br *barrier.Barrier, wg *sync.WaitGroup, channel *chan map[string]int, channel_daddy *chan map[string]int) {
+
+	defer wg.Done()
+
+	//starts its life waiting at the barrier
+	br.Wait_on_barrier()
+
+	map_recieved := make(map[string]int)
+
+readChannel:
+	for {
+		select {
+		//has been received a message_map on this channel
+		case m_tmp := <-*channel:
+			for key, value := range m_tmp {
+				map_recieved[key] += value
+			}
+
+		//timeout expired
+		case <-time.After(10 * time.Second): //TODO: decidere il valore del TIMEOUT
+			close(*channel)
+			break readChannel
+		}
+	}
+
+	//return values to father
+	*channel_daddy <- map_recieved
+
+	/*TEST:
+	fmt.Printf("\n\n REDUCER: IN TOTO HO RICEVUTO\n")
+	for key, value := range map_recieved {
+		fmt.Println("Key:", key, "Value:", value)
+	}
+	fmt.Printf("REDUCER: muoio\n\n")*/
 
 }
 
@@ -72,45 +102,40 @@ func (w *Wordcounter) Map(args Args, Result *Result) error {
 
 	var wg sync.WaitGroup
 
-	file_stream, err := os.Open(args.File)
-	check(err)
-
-	//init channel
-	chan_tmp := make(chan map[string]int)
-	args.Chan_to_reducer = &chan_tmp
-
-	//getFileSize
-	file_info, err := os.Stat(args.File)
-	check(err)
-	size := file_info.Size()
-	if size == 0 {
-		os.Exit(1)
+	//init channells mappers->reducer
+	chan_to_reducers := []chan map[string]int{}
+	for k := 0; k < args.M; k++ {
+		tmp := make(chan map[string]int, 10000)
+		chan_to_reducers = append(chan_to_reducers, tmp)
 	}
 
-	//buffer for file
-	buf := make([]byte, size)
+	//init channels reducers->father
+	chan_backTo_daddy := []chan map[string]int{}
+	for k := 0; k < args.M; k++ {
+		tmp := make(chan map[string]int, 10000)
+		chan_backTo_daddy = append(chan_backTo_daddy, tmp)
+	}
+
+	//creating barrier
+	br := barrier.New(args.N + args.M)
 
 	//read the entire file
-	buf, err = ioutil.ReadFile(args.File)
+	buf, err := ioutil.ReadFile(args.File)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	//closing file --> only for stream, no need to close is though
-
-	err = file_stream.Close()
-	if err != nil {
-		log.Fatal(err)
+	//create M thread_reducer and put them waiting on a barrier with specific channel
+	for i := 0; i < args.M; i++ {
+		wg.Add(1)
+		go reducer(br, &wg, &chan_to_reducers[i], &chan_backTo_daddy[i]) //listening only on a single channel
 	}
-
-	//TODO: create M thread and put them waiting on a barrier
 
 	//get an array of words and compute the number of words for each thread
-	list_of_words := strings.Split(string(buf), " ")
-	//number_of_words := math.Ceil(float64(len(list_of_words))/float64(num_worker))
-	number_of_words := int(float64(len(list_of_words)) / float64(args.N))
+	list_of_words := strings.Split(string(buf), " ") //TODO: bisogna controllare il formato del file: se ci sono \n lui non li elimina e crea una chiave < parola \n parola >
 
-	fmt.Printf("All words and number of words for each thread: %d - %d\n", len(list_of_words), number_of_words)
+	number_of_words := int(float64(len(list_of_words)) / float64(args.N))
+	fmt.Println("All words and number:", len(list_of_words), "and len of words for each thread:", number_of_words)
 
 	for i := 0; i < args.N; i += 1 {
 
@@ -120,17 +145,25 @@ func (w *Wordcounter) Map(args Args, Result *Result) error {
 		args.Offset = i * int(number_of_words)
 		words_to_read := int(math.Min(float64(number_of_words), float64(int(len(list_of_words))-(i*int(number_of_words)))))
 
-		fmt.Printf("Quanto legge e da dove parte: %d --- %d\n", words_to_read, args.Offset)
+		//TEST: fmt.Println("Quanto legge e da dove parte: ", words_to_read, " --- ", args.Offset)
 
 		if i == args.N-1 {
 			//last thread may read more than words_to_read words
-			go wordcount(&wg, args.Offset, words_to_read, list_of_words[args.Offset:], args.Chan_to_reducer)
+			go mapper(&wg, br, list_of_words[args.Offset:], &chan_to_reducers)
 		} else {
-			go wordcount(&wg, args.Offset, words_to_read, list_of_words[args.Offset:(i+1)*words_to_read], args.Chan_to_reducer)
+			go mapper(&wg, br, list_of_words[args.Offset:(i+1)*words_to_read], &chan_to_reducers)
 		}
+	}
 
-		wg.Wait()
+	//TODO: get_return values of REDUCERS
+	wg.Wait()
 
+	for child := 0; child < args.M; child++ {
+		m_tmp := <-chan_backTo_daddy[child]
+
+		for key, value := range m_tmp {
+			(*Result)[key] += value
+		}
 	}
 
 	return nil

@@ -39,7 +39,6 @@ func main() {
 		fmt.Println("Error in input. Usage: " + os.Args[0] + "<N of Mappers> <M of Reduces> <directory_path> ")
 		os.Exit(1)
 	}
-	fmt.Println(" Ho letto:", os.Args)
 
 	N := int(convertToInt(os.Args[1]))
 	M := int(convertToInt(os.Args[2]))
@@ -63,14 +62,10 @@ func main() {
 		args_rpc.N = N
 		args_rpc.M = M
 
-		/*err = file_stream.Close()
-		if err != nil {
-			log.Fatal(err)
-		}*/
-
 		//rpc call -> file.txt
 		// reply will store the RPC result
-		var wordcount rpcservice.Result
+
+		var wordcount rpcservice.Result = make(map[string]int)
 
 		fmt.Printf("filename %s\n", args_rpc.File)
 		fmt.Printf("N e M %d - %d\n", args_rpc.N, args_rpc.M)
@@ -80,7 +75,11 @@ func main() {
 		if err != nil {
 			log.Fatal("Error in wordcounter.Map: ", err)
 		}
-		fmt.Printf("wordcounter.Map %d\n", wordcount)
+
+		fmt.Printf("_________________________RESULTS of %s_________________________\n", args_rpc.File)
+		for key, value := range wordcount {
+			fmt.Println("Key:", key, "Value:", value)
+		}
 
 	}
 
