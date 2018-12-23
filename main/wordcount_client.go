@@ -64,7 +64,6 @@ func main() {
 
 		//rpc call -> file.txt
 		// reply will store the RPC result
-
 		var wordcount rpcservice.Result = make(map[string]int)
 
 		fmt.Printf("filename %s\n", args_rpc.File)

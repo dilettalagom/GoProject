@@ -27,8 +27,6 @@ func mapper(wg *sync.WaitGroup, br *barrier.Barrier, buf []string, channel_reduc
 
 	defer wg.Done()
 
-	fmt.Println(buf)
-
 	word_map := make(map[string]int)
 
 	for i := 0; i < len(buf); i++ {
@@ -43,6 +41,7 @@ func mapper(wg *sync.WaitGroup, br *barrier.Barrier, buf []string, channel_reduc
 		}
 	}
 
+	//waiting all the other mappers
 	br.Wait_on_barrier()
 
 	for key, _ := range word_map {
@@ -155,9 +154,9 @@ func (w *Wordcounter) Map(args Args, Result *Result) error {
 		}
 	}
 
-	//TODO: get_return values of REDUCERS
 	wg.Wait()
 
+	//merging all children's results
 	for child := 0; child < args.M; child++ {
 		m_tmp := <-chan_backTo_daddy[child]
 
