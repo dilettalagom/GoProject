@@ -58,16 +58,13 @@ func main() {
 		file_stream = file_stream
 		//setup rpc arg
 		args_rpc := rpcservice.Args{}
-		args_rpc.File = name_file //perché prima metteva tutta la directory + file (file_stream.Name())
+		args_rpc.File = name_file
 		args_rpc.N = N
 		args_rpc.M = M
 
 		//rpc call -> file.txt
 		// reply will store the RPC result
 		var wordcount rpcservice.Result = make(map[string]int)
-
-		fmt.Printf("filename %s\n", args_rpc.File)
-		fmt.Printf("N e M %d - %d\n", args_rpc.N, args_rpc.M)
 
 		// Call remote procedure
 		err = client.Call("wordcounter.Map", args_rpc, &wordcount)
@@ -77,7 +74,7 @@ func main() {
 
 		fmt.Printf("_________________________RESULTS of %s_________________________\n", args_rpc.File)
 		for key, value := range wordcount {
-			fmt.Println("Key:", key, "Value:", value)
+			fmt.Println("| Key:", key, " -> Value: ", value)
 		}
 
 	}

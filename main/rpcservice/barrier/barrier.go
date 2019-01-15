@@ -23,7 +23,7 @@ func (b *Barrier) Wait_on_barrier() {
 	b.m.Lock()
 	b.c += 1
 	if b.c == b.n {
-		// open gate
+
 		for i := 0; i < b.n; i++ {
 			b.before <- 1
 		}
