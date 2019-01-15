@@ -2,27 +2,27 @@ package rpcservice
 
 import (
 	"./barrier"
+	"bufio"
 	"fmt"
-	"io/ioutil"
-	"log"
 	"math"
+	"os"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 type Args struct {
-	File   string
-	N      int
-	M      int
-	Offset int
+	File string
+	N    int
+	M    int
 }
 
 type Result map[string]int
 
 type Wordcounter int
 
-//goroutines
+/* mapper routine*/
 func mapper(wg *sync.WaitGroup, br *barrier.Barrier, buf []string, channel_reducer *[]chan map[string]int) {
 
 	defer wg.Done()
@@ -52,7 +52,6 @@ func mapper(wg *sync.WaitGroup, br *barrier.Barrier, buf []string, channel_reduc
 
 		if len(*channel_reducer) != 0 {
 			c_index := int(sum) % len(*channel_reducer)
-			//fmt.Printf("hashing %d\n", c_index)
 			m := map[string]int{key: word_map[key]}
 			(*channel_reducer)[c_index] <- m
 		}
@@ -60,6 +59,7 @@ func mapper(wg *sync.WaitGroup, br *barrier.Barrier, buf []string, channel_reduc
 
 }
 
+/* reducer routine*/
 func reducer(br *barrier.Barrier, wg *sync.WaitGroup, channel *chan map[string]int, channel_daddy *chan map[string]int) {
 
 	defer wg.Done()
@@ -67,7 +67,7 @@ func reducer(br *barrier.Barrier, wg *sync.WaitGroup, channel *chan map[string]i
 	//starts its life waiting at the barrier
 	br.Wait_on_barrier()
 
-	map_recieved := make(map[string]int)
+	map_received := make(map[string]int)
 
 readChannel:
 	for {
@@ -75,25 +75,17 @@ readChannel:
 		//has been received a message_map on this channel
 		case m_tmp := <-*channel:
 			for key, value := range m_tmp {
-				map_recieved[key] += value
+				map_received[key] += value
 			}
 
 		//timeout expired
-		case <-time.After(10 * time.Second): //TODO: decidere il valore del TIMEOUT
-			close(*channel)
+		case <-time.After(5 * time.Second):
 			break readChannel
 		}
 	}
 
 	//return values to father
-	*channel_daddy <- map_recieved
-
-	/*TEST:
-	fmt.Printf("\n\n REDUCER: IN TOTO HO RICEVUTO\n")
-	for key, value := range map_recieved {
-		fmt.Println("Key:", key, "Value:", value)
-	}
-	fmt.Printf("REDUCER: muoio\n\n")*/
+	*channel_daddy <- map_received
 
 }
 
@@ -118,39 +110,50 @@ func (w *Wordcounter) Map(args Args, Result *Result) error {
 	//creating barrier
 	br := barrier.New(args.N + args.M)
 
-	//read the entire file
-	buf, err := ioutil.ReadFile(args.File)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	//create M thread_reducer and put them waiting on a barrier with specific channel
 	for i := 0; i < args.M; i++ {
 		wg.Add(1)
 		go reducer(br, &wg, &chan_to_reducers[i], &chan_backTo_daddy[i]) //listening only on a single channel
 	}
 
-	//get an array of words and compute the number of words for each thread
-	list_of_words := strings.Split(string(buf), " ") //TODO: bisogna controllare il formato del file: se ci sono \n lui non li elimina e crea una chiave < parola \n parola >
+	file_to_chunk, err := os.Open(args.File)
+	if err != nil {
+		panic(err)
+	}
+
+	var list_of_words []string
+	scanner := bufio.NewScanner(file_to_chunk)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.Split(line, " ")
+
+		for i := range parts {
+			list_of_words = append(list_of_words, strings.TrimFunc(parts[i], func(r rune) bool {
+				return !unicode.IsLetter(r)
+			}))
+
+		}
+	}
 
 	number_of_words := int(float64(len(list_of_words)) / float64(args.N))
 	fmt.Println("All words and number:", len(list_of_words), "and len of words for each thread:", number_of_words)
+
+	offset := 0
 
 	for i := 0; i < args.N; i += 1 {
 
 		wg.Add(1)
 
 		//compute the offset from which each thread starts and the number of words to count
-		args.Offset = i * int(number_of_words)
+		offset = i * int(number_of_words)
 		words_to_read := int(math.Min(float64(number_of_words), float64(int(len(list_of_words))-(i*int(number_of_words)))))
-
-		//TEST: fmt.Println("Quanto legge e da dove parte: ", words_to_read, " --- ", args.Offset)
 
 		if i == args.N-1 {
 			//last thread may read more than words_to_read words
-			go mapper(&wg, br, list_of_words[args.Offset:], &chan_to_reducers)
+			go mapper(&wg, br, list_of_words[offset:], &chan_to_reducers)
 		} else {
-			go mapper(&wg, br, list_of_words[args.Offset:(i+1)*words_to_read], &chan_to_reducers)
+			go mapper(&wg, br, list_of_words[offset:(i+1)*words_to_read], &chan_to_reducers)
 		}
 	}
 

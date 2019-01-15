@@ -1,0 +1,9 @@
+Per avviare l'applicazione:
+
+cambiare directory a main
+
+go run wordcount_server.go
+
+go run wordcount_client.go N M ./testFiles
+
+N.B. ./testFiles è il path della directory che contiene i file di test
